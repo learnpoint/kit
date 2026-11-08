@@ -55,7 +55,8 @@ func render(src string) (*site, []string) {
 		if rel == "." {
 			return nil
 		}
-		// Like piko, only the top-level folders are left out.
+		// Only the top-level folders are left out; nested _includes and
+		// _layouts are copied.
 		if rel == "_includes" || rel == "_layouts" {
 			if d.IsDir() {
 				return filepath.SkipDir

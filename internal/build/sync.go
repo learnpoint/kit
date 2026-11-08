@@ -161,7 +161,7 @@ func copyCNAMEToSrc(src, docs string) (bool, error) {
 }
 
 // isKept reports whether a file in docs without a source must stay.
-// CNAME is GitHub Pages' custom domain; piko matches it in any case.
+// CNAME is GitHub Pages' custom domain, matched in any case.
 func isKept(rel string) bool {
 	return strings.EqualFold(rel, "CNAME") || rel == noJekyllFile || rel == siteContentFile
 }

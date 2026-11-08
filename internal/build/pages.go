@@ -16,8 +16,7 @@ type Page struct {
 	Content     string `json:"content"`
 }
 
-// The patterns are piko's, with jsDot and jsSpace for JavaScript's "."
-// and "\s".
+// The patterns use jsDot and jsSpace for JavaScript's "." and "\s".
 var (
 	titlePattern       = regexp.MustCompile(`<title>(` + jsDot + `*?)</title>`)
 	descriptionPattern = regexp.MustCompile(`<meta name="description" content="(` + jsDot + `*?)" />`)
@@ -67,7 +66,7 @@ func firstGroup(re *regexp.Regexp, s string) string {
 	return ""
 }
 
-// mainTagContent ports piko's
+// mainTagContent implements
 //
 //	/<main[^>]*>([^<]*(?:(?!<\/?main)<[^<]*)*)<\/main\s*>/i
 //

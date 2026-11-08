@@ -47,7 +47,7 @@ func parseFrontmatter(text string) (map[string]string, string, error) {
 		data[key] = unquote(strings.TrimSpace(value))
 	}
 
-	// piko trims the content after frontmatter, but not a page without it.
+	// The content after frontmatter is trimmed; a page without frontmatter is not.
 	return data, jsTrim(body), nil
 }
 

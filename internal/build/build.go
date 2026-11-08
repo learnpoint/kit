@@ -1,6 +1,5 @@
 // Package build implements kit build: a small static site generator
-// that builds ./src into ./docs. It is a Go port of piko's build
-// (https://github.com/learnpoint/piko/blob/main/build.js).
+// that builds ./src into ./docs.
 package build
 
 import (

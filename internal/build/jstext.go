@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// piko is JavaScript, and its regexes and trim() have JavaScript
-// semantics. Go's differ in ways that change output, so the ports use
-// these instead of Go's ".", "\s" and strings.TrimSpace.
+// Sites depend on JavaScript semantics for regexes and trim(). Go's
+// differ in ways that change output, so the patterns use these instead
+// of Go's ".", "\s" and strings.TrimSpace.
 
 // jsDot matches what "." matches in a JavaScript regex: anything but a
 // line terminator. Go's "." also matches "\r", U+2028 and U+2029.

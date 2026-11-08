@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	// The patterns are piko's, with jsDot for JavaScript's ".".
+	// The patterns use jsDot for JavaScript's ".".
 	contentPattern  = regexp.MustCompile(`\{\{ ?content ?\}\}`)
 	variablePattern = regexp.MustCompile(`\{\{(` + jsDot + `*?)\}\}`)
 	commentPattern  = regexp.MustCompile(`<!--` + jsDot + `*?-->`)
@@ -27,8 +27,8 @@ var (
 
 // Raw HTML is allowed because markdown pages contain HTML and include
 // comments. The GFM extensions are listed one by one, instead of
-// extension.GFM, to render table alignment as an align attribute, like
-// piko's markdown renderer (marked) does.
+// extension.GFM, to render table alignment as an align attribute, which
+// existing sites' output relies on.
 var markdown = goldmark.New(
 	goldmark.WithExtensions(
 		extension.Linkify,
@@ -105,7 +105,7 @@ func (r *renderer) applyLayout(content, layout string) string {
 		r.problemf("layout %q has no {{ content }}", layout)
 		return content
 	}
-	// Inserted as is: piko's string replace would expand "$&" and similar
+	// Inserted as is: a regexp replace would expand "$1" and similar
 	// patterns in the page, which is never what the page meant.
 	return text[:loc[0]] + content + text[loc[1]:]
 }
@@ -155,7 +155,7 @@ func (r *renderer) renderIncludesAndVariables(text string, data map[string]strin
 // Without a default, an unknown name is left as it is.
 func renderVariables(text string, data map[string]string) string {
 	return variablePattern.ReplaceAllStringFunc(text, func(match string) string {
-		// Like piko's split('||'): more than one || ignores the rest.
+		// Split on every ||: only the first two parts count, the rest is ignored.
 		parts := strings.Split(match[2:len(match)-2], "||")
 		if value := data[jsTrim(parts[0])]; value != "" {
 			return value
@@ -191,8 +191,8 @@ func parseIncludeComment(comment string) (string, map[string]string, error) {
 }
 
 // parseProps parses { key: "value", ... }: unquoted keys and single or
-// double quoted values, kept exactly. piko evaluates props as JavaScript; this
-// accepts the subset that sites use, without evaluating anything.
+// double quoted values, kept exactly. Props are never evaluated; this
+// accepts the subset of JavaScript object literals that sites use.
 func parseProps(s string) (map[string]string, error) {
 	rest, ok := strings.CutPrefix(s, "{")
 	if !ok {
@@ -284,8 +284,8 @@ func describeReadError(kind, name, folder string, err error) string {
 	}
 }
 
-// stripBOM removes a UTF-8 byte order mark, like Deno's readTextFile
-// does in piko. Otherwise frontmatter after a BOM would not be found.
+// stripBOM removes a UTF-8 byte order mark. Otherwise frontmatter after
+// a BOM would not be found.
 func stripBOM(s string) string {
 	return strings.TrimPrefix(s, "\xef\xbb\xbf")
 }

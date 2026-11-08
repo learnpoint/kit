@@ -1,6 +1,5 @@
 // Package dev implements kit dev: build ./src into ./docs, serve ./docs
-// with live reload, and rebuild when ./src changes. It is a Go port of
-// piko's dev (https://github.com/learnpoint/piko/blob/main/dev.js).
+// with live reload, and rebuild when ./src changes.
 package dev
 
 import (
