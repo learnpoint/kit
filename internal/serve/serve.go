@@ -215,6 +215,11 @@ func logRequests(logger *log.Logger, mode RequestLog, next http.Handler) http.Ha
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
+		// Browsers and tools probe /.well-known/ on their own (Chrome asks
+		// for a devtools.json), so those 404s are noise, not broken links.
+		if rec.status == http.StatusNotFound && strings.HasPrefix(r.URL.Path, "/.well-known/") {
+			return
+		}
 		failed := rec.status == http.StatusNotFound || rec.status >= 500
 		if mode == LogAll || failed {
 			logger.Printf("%s %s %d", r.Method, r.URL.Path, rec.status)

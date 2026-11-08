@@ -324,6 +324,31 @@ func TestHandlerLogFailed(t *testing.T) {
 	}
 }
 
+func TestHandlerSkipsWellKnown404Log(t *testing.T) {
+	const page = "<html><body>custom not found</body></html>"
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"404.html": page, "a.txt": "hello"})
+
+	for _, mode := range []RequestLog{LogAll, LogFailed} {
+		var logs bytes.Buffer
+		h := NewHandler(dir, log.New(&logs, "", 0), mode)
+
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/appspecific/com.chrome.devtools.json", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("mode %d: status = %d, want %d", mode, rec.Code, http.StatusNotFound)
+		}
+		if got := rec.Body.String(); got != page {
+			t.Errorf("mode %d: body = %q, want %q", mode, got, page)
+		}
+
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
+		if got, want := logs.String(), "GET /missing 404\n"; got != want {
+			t.Errorf("mode %d: log = %q, want %q", mode, got, want)
+		}
+	}
+}
+
 func TestNotFoundPage(t *testing.T) {
 	const page = "<html><body>custom not found</body></html>"
 	dir := t.TempDir()
