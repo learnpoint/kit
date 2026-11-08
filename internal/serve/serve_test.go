@@ -278,10 +278,15 @@ func TestServeServerHeader(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, ln, h, "v1.2.3", io.Discard) }()
 
+	// A pooled client can dial a spare connection that never gets a request.
+	// Shutdown treats such a new connection as active for 5s, so it would
+	// hit shutdownTimeout. Without keep-alives every request uses its own.
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
 	url := "http://" + ln.Addr().String()
 	const want = "kit/v1.2.3"
 	for _, p := range []string{"/", "/missing"} {
-		resp, err := http.Get(url + p)
+		resp, err := client.Get(url + p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -291,21 +296,22 @@ func TestServeServerHeader(t *testing.T) {
 		}
 	}
 
-	streamCtx, cancelStream := context.WithCancel(context.Background())
-	resp := connect(t, streamCtx, url)
+	resp := connect(t, context.Background(), client, url)
 	if got := resp.Header.Get("Server"); got != want {
 		t.Errorf("reload stream: Server = %q, want %q", got, want)
 	}
-	cancelStream()
 
+	// Reading to EOF makes sure the stream handler has returned before Shutdown starts.
 	b.Close()
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
 	cancel()
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Errorf("serve = %v, want nil", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(shutdownTimeout + time.Second):
 		t.Fatal("serve did not return after cancel")
 	}
 }

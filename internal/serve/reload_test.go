@@ -15,13 +15,13 @@ import (
 
 // connect opens a reload stream on srv. When it returns, the response
 // headers have arrived, so the Broadcaster has registered the client.
-func connect(t *testing.T, ctx context.Context, url string) *http.Response {
+func connect(t *testing.T, ctx context.Context, client *http.Client, url string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+reloadPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestBroadcaster(t *testing.T) {
 		defer srv.Close()
 		defer b.Close()
 
-		resp := connect(t, context.Background(), srv.URL)
+		resp := connect(t, context.Background(), http.DefaultClient, srv.URL)
 		if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 			t.Errorf("Content-Type = %q, want %q", got, "text/event-stream")
 		}
@@ -104,8 +104,8 @@ func TestBroadcaster(t *testing.T) {
 		defer srv.Close()
 		defer b.Close()
 
-		r1 := bufio.NewReader(connect(t, context.Background(), srv.URL).Body)
-		r2 := bufio.NewReader(connect(t, context.Background(), srv.URL).Body)
+		r1 := bufio.NewReader(connect(t, context.Background(), http.DefaultClient, srv.URL).Body)
+		r2 := bufio.NewReader(connect(t, context.Background(), http.DefaultClient, srv.URL).Body)
 		readEvent(t, r1) // version
 		readEvent(t, r2)
 
@@ -130,7 +130,7 @@ func TestBroadcaster(t *testing.T) {
 		defer b.Close()
 
 		b.Notify() // the version must be current, not the initial one
-		r := bufio.NewReader(connect(t, context.Background(), srv.URL).Body)
+		r := bufio.NewReader(connect(t, context.Background(), http.DefaultClient, srv.URL).Body)
 		want := []string{"event: version", "data: " + b.Version()}
 		if got := readEvent(t, r); strings.Join(got, "\n") != strings.Join(want, "\n") {
 			t.Errorf("first event = %q, want %q", got, want)
@@ -155,7 +155,7 @@ func TestBroadcaster(t *testing.T) {
 		defer b.Close()
 
 		ctx, cancel := context.WithCancel(context.Background())
-		connect(t, ctx, srv.URL)
+		connect(t, ctx, http.DefaultClient, srv.URL)
 		waitForClients(t, b, 1)
 		cancel()
 		waitForClients(t, b, 0)
@@ -166,7 +166,7 @@ func TestBroadcaster(t *testing.T) {
 		srv := httptest.NewServer(b)
 		defer srv.Close()
 
-		resp := connect(t, context.Background(), srv.URL)
+		resp := connect(t, context.Background(), http.DefaultClient, srv.URL)
 		b.Close()
 		b.Close() // closing twice must not panic
 
@@ -185,7 +185,7 @@ func TestBroadcaster(t *testing.T) {
 		}
 
 		// New connections after close end right away.
-		resp = connect(t, context.Background(), srv.URL)
+		resp = connect(t, context.Background(), http.DefaultClient, srv.URL)
 		if _, err := io.ReadAll(resp.Body); err != nil {
 			t.Errorf("read after close = %v, want EOF", err)
 		}
@@ -232,7 +232,7 @@ func TestWithReload(t *testing.T) {
 		t.Errorf("body = %q, want %q", body, "hello")
 	}
 
-	resp = connect(t, context.Background(), srv.URL)
+	resp = connect(t, context.Background(), http.DefaultClient, srv.URL)
 	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type = %q, want %q", got, "text/event-stream")
 	}
@@ -258,7 +258,7 @@ func TestServeShutdownWithReloadStream(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, ln, WithReload(http.NotFoundHandler(), b), "dev", io.Discard) }()
 
-	connect(t, context.Background(), "http://"+ln.Addr().String())
+	connect(t, context.Background(), http.DefaultClient, "http://"+ln.Addr().String())
 
 	start := time.Now()
 	cancel()
