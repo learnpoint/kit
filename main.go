@@ -30,9 +30,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands = []cli.Command{
 		help.Command(func() []cli.Command { return commands }),
 		build.Command(),
-		dev.Command(),
+		dev.Command(version),
 		repocopy.Command(version),
-		serve.Command(),
+		serve.Command(version),
 		upgrade.Command(version),
 		versioncmd.Command(version),
 	}

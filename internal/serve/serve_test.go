@@ -39,7 +39,7 @@ func TestRun(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := Command().Run(tt.args, &stdout, &stderr)
+			code := Command("dev").Run(tt.args, &stdout, &stderr)
 
 			if code != tt.wantCode {
 				t.Errorf("exit code = %d, want %d", code, tt.wantCode)
@@ -235,7 +235,7 @@ func TestServeShutdown(t *testing.T) {
 	var stdout bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- Serve(ctx, ln, NewHandler(dir, log.New(io.Discard, "", 0), LogAll), &stdout)
+		done <- Serve(ctx, ln, NewHandler(dir, log.New(io.Discard, "", 0), LogAll), "dev", &stdout)
 	}()
 
 	resp, err := http.Get("http://" + ln.Addr().String() + "/a.txt")
@@ -259,6 +259,54 @@ func TestServeShutdown(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Shutting down") {
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), "Shutting down")
+	}
+}
+
+func TestServeServerHeader(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"index.html": "<p>hi</p>"})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	b := NewBroadcaster()
+	h := WithReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), b)
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, ln, h, "v1.2.3", io.Discard) }()
+
+	url := "http://" + ln.Addr().String()
+	const want = "kit/v1.2.3"
+	for _, p := range []string{"/", "/missing"} {
+		resp, err := http.Get(url + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("Server"); got != want {
+			t.Errorf("GET %s: Server = %q, want %q", p, got, want)
+		}
+	}
+
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	resp := connect(t, streamCtx, url)
+	if got := resp.Header.Get("Server"); got != want {
+		t.Errorf("reload stream: Server = %q, want %q", got, want)
+	}
+	cancelStream()
+
+	b.Close()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after cancel")
 	}
 }
 

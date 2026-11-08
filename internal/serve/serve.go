@@ -41,12 +41,15 @@ const (
 	LogFailed            // only 404s and server errors
 )
 
-func Command() cli.Command {
+// Command returns the serve command. version is sent in the Server header.
+func Command(version string) cli.Command {
 	return cli.Command{
 		Name:    "serve",
 		Summary: "Serve the current folder over HTTP",
 		Help:    printHelp,
-		Run:     run,
+		Run: func(args []string, stdout, stderr io.Writer) int {
+			return run(version, args, stdout, stderr)
+		},
 	}
 }
 
@@ -63,7 +66,7 @@ Flags:
 `)
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(version string, args []string, stdout, stderr io.Writer) int {
 	fset := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fset.SetOutput(stderr)
 	fset.Usage = func() {} // we print help ourselves, so it goes to the right stream
@@ -133,7 +136,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 		}()
 	}
-	if err := Serve(ctx, ln, h, stdout); err != nil {
+	if err := Serve(ctx, ln, h, version, stdout); err != nil {
 		fmt.Fprintf(stderr, "kit serve: %v\n", err)
 		return 1
 	}
@@ -171,8 +174,9 @@ func listen(port, tries int, listenFn func(addr string) (net.Listener, error)) (
 }
 
 // Serve serves h on ln until ctx is done, then shuts the server down.
-func Serve(ctx context.Context, ln net.Listener, h http.Handler, stdout io.Writer) error {
-	srv := &http.Server{Handler: h}
+// Every response gets the header "Server: kit/<version>".
+func Serve(ctx context.Context, ln net.Listener, h http.Handler, version string, stdout io.Writer) error {
+	srv := &http.Server{Handler: serverHeader("kit/"+version, h)}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 
@@ -189,6 +193,15 @@ func Serve(ctx context.Context, ln net.Listener, h http.Handler, stdout io.Write
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// serverHeader is applied in Serve rather than NewHandler so it also
+// covers the reload stream, which WithReload routes around NewHandler.
+func serverHeader(name string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", name)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // NewHandler serves the files in dir without caching, dotfiles or

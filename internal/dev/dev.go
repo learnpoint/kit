@@ -21,12 +21,15 @@ import (
 	"github.com/learnpoint/kit/internal/watch"
 )
 
-func Command() cli.Command {
+// Command returns the dev command. version is sent in the Server header.
+func Command(version string) cli.Command {
 	return cli.Command{
 		Name:    "dev",
 		Summary: "Build ./src into ./docs, serve it, rebuild on change",
 		Help:    printHelp,
-		Run:     run,
+		Run: func(args []string, stdout, stderr io.Writer) int {
+			return run(version, args, stdout, stderr)
+		},
 	}
 }
 
@@ -46,7 +49,7 @@ Flags:
 `)
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(version string, args []string, stdout, stderr io.Writer) int {
 	fset := flag.NewFlagSet("dev", flag.ContinueOnError)
 	fset.SetOutput(stderr)
 	fset.Usage = func() {} // we print help ourselves, so it goes to the right stream
@@ -128,7 +131,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}()
 
-	if err := serve.Serve(ctx, ln, h, stdout); err != nil {
+	if err := serve.Serve(ctx, ln, h, version, stdout); err != nil {
 		fmt.Fprintf(stderr, "kit dev: %v\n", err)
 		return 1
 	}

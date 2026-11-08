@@ -256,7 +256,7 @@ func TestServeShutdownWithReloadStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, ln, WithReload(http.NotFoundHandler(), b), io.Discard) }()
+	go func() { done <- Serve(ctx, ln, WithReload(http.NotFoundHandler(), b), "dev", io.Discard) }()
 
 	connect(t, context.Background(), "http://"+ln.Addr().String())
 

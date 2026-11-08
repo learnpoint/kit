@@ -68,17 +68,17 @@ func TestRebuild(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"extra"}, &stdout, &stderr); code != 2 {
+	if code := run("dev", []string{"extra"}, &stdout, &stderr); code != 2 {
 		t.Errorf("arguments: exit code = %d, want 2", code)
 	}
-	if code := run([]string{"--port", "0"}, &stdout, &stderr); code != 2 {
+	if code := run("dev", []string{"--port", "0"}, &stdout, &stderr); code != 2 {
 		t.Errorf("port 0: exit code = %d, want 2", code)
 	}
-	if code := run([]string{"-p", "0"}, &stdout, &stderr); code != 2 {
+	if code := run("dev", []string{"-p", "0"}, &stdout, &stderr); code != 2 {
 		t.Errorf("-p 0: exit code = %d, want 2", code)
 	}
 	stdout.Reset()
-	if code := run([]string{"-h"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Usage: kit dev") {
+	if code := run("dev", []string{"-h"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Usage: kit dev") {
 		t.Errorf("-h: exit code %d, stdout %q", code, stdout.String())
 	}
 }
@@ -86,7 +86,7 @@ func TestRun(t *testing.T) {
 func TestRunMissingSrc(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr); code != 1 {
+	if code := run("dev", nil, &stdout, &stderr); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "kit dev: no src folder in ") || !strings.Contains(stderr.String(), "Run dev from the project folder") {
