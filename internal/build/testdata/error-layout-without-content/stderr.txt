@@ -1,0 +1,2 @@
+src/index.html: layout "base.html" has no {{ content }}
+kit build: 1 error, nothing written

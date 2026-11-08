@@ -1,0 +1,168 @@
+package serve
+
+import (
+	"io"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestInsertScript(t *testing.T) {
+	const script = "<script>reload()</script>"
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "before </body>", body: "<p>hi</p></body></html>", want: "<p>hi</p>" + script + "</body></html>"},
+		{name: "uppercase", body: "<P>hi</P></BODY></HTML>", want: "<P>hi</P>" + script + "</BODY></HTML>"},
+		{name: "last of several", body: "<pre></body></pre></body>", want: "<pre></body></pre>" + script + "</body>"},
+		{name: "no </body>", body: "<p>hi</p>", want: "<p>hi</p>" + script},
+		{name: "empty", body: "", want: script},
+		// İ lowercases to more bytes, which would shift offsets if the
+		// search lowercased the body.
+		{name: "non-ASCII", body: "İİİ</body>", want: "İİİ" + script + "</body>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := string(insertScript([]byte(tt.body), script)); got != tt.want {
+				t.Errorf("insertScript(%q) = %q, want %q", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInjectReload(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"index.html": "<html><body><p>home</p></body></html>",
+		"page.htm":   "<p>no body tag</p>",
+		"style.css":  "body { color: red }",
+		"a.txt":      "<p>not html</p>",
+	})
+	h := injectReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), func() string { return "v1" })
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		header     map[string]string
+		wantStatus int
+		wantScript bool
+	}{
+		{name: "html page", path: "/", wantStatus: http.StatusOK, wantScript: true},
+		{name: "html without </body>", path: "/page.htm", wantStatus: http.StatusOK, wantScript: true},
+		{name: "css", path: "/style.css", wantStatus: http.StatusOK},
+		{name: "text that looks like html", path: "/a.txt", wantStatus: http.StatusOK},
+		{name: "not found without 404.html", path: "/missing.html", wantStatus: http.StatusNotFound},
+		{name: "head", method: http.MethodHead, path: "/", wantStatus: http.StatusOK},
+		{
+			name:       "if-modified-since is ignored",
+			path:       "/",
+			header:     map[string]string{"If-Modified-Since": time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)},
+			wantStatus: http.StatusOK,
+			wantScript: true,
+		},
+		{
+			name:       "range",
+			path:       "/",
+			header:     map[string]string{"Range": "bytes=0-5"},
+			wantStatus: http.StatusPartialContent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method := tt.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			req := httptest.NewRequest(method, tt.path, nil)
+			for k, v := range tt.header {
+				req.Header.Set(k, v)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			body := rec.Body.String()
+			if got := strings.Contains(body, reloadScript("v1")); got != tt.wantScript {
+				t.Errorf("body has script = %v, want %v; body = %q", got, tt.wantScript, body)
+			}
+			if cl := rec.Header().Get("Content-Length"); cl != "" && method == http.MethodGet && cl != strconv.Itoa(len(body)) {
+				t.Errorf("Content-Length = %s, body is %d bytes", cl, len(body))
+			}
+			if tt.wantScript {
+				if got := rec.Header().Get("Accept-Ranges"); got != "" {
+					t.Errorf("Accept-Ranges = %q, want it removed", got)
+				}
+				if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+					t.Errorf("Cache-Control = %q, want %q", got, "no-store")
+				}
+			}
+		})
+	}
+}
+
+func TestInjectReloadNotFoundPage(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"404.html": "<body>not found</body>"})
+	h := injectReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), func() string { return "v1" })
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	body := rec.Body.String()
+	if want := "<body>not found" + reloadScript("v1") + "</body>"; body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+	if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
+		t.Errorf("Content-Length = %s, body is %d bytes", got, len(body))
+	}
+}
+
+func TestWithReloadInjects(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"index.html": "<body>home</body>"})
+	b := NewBroadcaster()
+	defer b.Close()
+	srv := httptest.NewServer(WithReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), b))
+	defer srv.Close()
+
+	get := func() string {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return string(body)
+	}
+
+	v1 := b.Version()
+	if body, want := get(), "<body>home"+reloadScript(v1)+"</body>"; body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+
+	// After a change, pages carry the new version.
+	b.Notify()
+	v2 := b.Version()
+	body := get()
+	if want := "<body>home" + reloadScript(v2) + "</body>"; body != want {
+		t.Errorf("body after notify = %q, want %q", body, want)
+	}
+	if strings.Contains(body, `"`+v1+`"`) {
+		t.Errorf("body after notify still has old version %q", v1)
+	}
+}
