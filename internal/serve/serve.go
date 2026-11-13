@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/learnpoint/kit/internal/cli"
+	"github.com/learnpoint/kit/internal/color"
 	"github.com/learnpoint/kit/internal/watch"
 )
 
@@ -201,13 +202,15 @@ func serverHeader(name string, next http.Handler) http.Handler {
 
 // NewHandler serves the files in dir without caching, dotfiles or
 // directory listings. It logs failed requests (status >= 400) to logger,
-// or every request if verbose.
+// or every request if verbose. Failed requests are red when the logger
+// writes to a terminal that supports colors.
 func NewHandler(dir string, logger *log.Logger, verbose bool) http.Handler {
 	files := http.FileServer(noListingFS{http.Dir(dir)})
 	return logRequests(logger, verbose, noCache(notFoundPage(dir, hideDotfiles(files))))
 }
 
 func logRequests(logger *log.Logger, verbose bool, next http.Handler) http.Handler {
+	red := color.Enabled(logger.Writer())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
@@ -218,7 +221,11 @@ func logRequests(logger *log.Logger, verbose bool, next http.Handler) http.Handl
 				return
 			}
 		}
-		logger.Printf("%s %s %d", r.Method, r.URL.Path, rec.status)
+		line := fmt.Sprintf("%s %s %d", r.Method, r.URL.Path, rec.status)
+		if red && rec.status >= 400 {
+			line = color.Red(line)
+		}
+		logger.Print(line)
 	})
 }
 
