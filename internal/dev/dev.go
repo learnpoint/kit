@@ -34,18 +34,20 @@ func Command(version string) cli.Command {
 }
 
 func printHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage: kit dev [--port N]
+	fmt.Fprint(w, `Usage: kit dev [--port N] [--verbose]
 
 Build the site in ./src into ./docs, serve ./docs over HTTP on
 localhost, and rebuild when a file in ./src changes. Open pages reload
 when a rebuild changes docs/. Run it from the project folder.
 
 If a build fails, the errors are printed and the last good docs/ is
-still served. Fixing the source is enough to rebuild.
+still served. Fixing the source is enough to rebuild. Failed requests
+(status 400 and up) are logged.
 
 Flags:
   -p, --port N   port to listen on (default 4444; if 4444 is busy,
                  the next free port up to 4453 is used)
+      --verbose  log every request, not just failed ones
 `)
 }
 
@@ -56,6 +58,7 @@ func run(version string, args []string, stdout, stderr io.Writer) int {
 	var port int
 	fset.IntVar(&port, "port", serve.DefaultPort, "")
 	fset.IntVar(&port, "p", serve.DefaultPort, "")
+	verbose := fset.Bool("verbose", false, "")
 	if err := fset.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printHelp(stdout)
@@ -117,7 +120,7 @@ func run(version string, args []string, stdout, stderr io.Writer) int {
 
 	b := serve.NewBroadcaster()
 	context.AfterFunc(ctx, b.Close)
-	h := serve.WithReload(serve.NewHandler(docs, log.New(stdout, "", log.Ltime), serve.LogFailed), b)
+	h := serve.WithReload(serve.NewHandler(docs, log.New(stdout, "", log.Ltime), *verbose), b)
 
 	// Watch calls onChange from its own loop, so rebuilds never overlap.
 	go func() {

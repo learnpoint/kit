@@ -33,14 +33,6 @@ const (
 	shutdownTimeout  = 5 * time.Second
 )
 
-// RequestLog chooses which requests a handler logs.
-type RequestLog int
-
-const (
-	LogAll    RequestLog = iota
-	LogFailed            // only 404s and server errors
-)
-
 // Command returns the serve command. version is sent in the Server header.
 func Command(version string) cli.Command {
 	return cli.Command{
@@ -54,15 +46,17 @@ func Command(version string) cli.Command {
 }
 
 func printHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage: kit serve [--port N] [--no-reload]
+	fmt.Fprint(w, `Usage: kit serve [--port N] [--no-reload] [--verbose]
 
 Serve the files in the current folder over HTTP on localhost.
-Open pages reload when a file in the folder changes.
+Open pages reload when a file in the folder changes. Failed requests
+(status 400 and up) are logged.
 
 Flags:
   -p, --port N      port to listen on (default 4444; if 4444 is busy,
                     the next free port up to 4453 is used)
       --no-reload   don't reload pages when files change
+      --verbose     log every request, not just failed ones
 `)
 }
 
@@ -74,6 +68,7 @@ func run(version string, args []string, stdout, stderr io.Writer) int {
 	fset.IntVar(&port, "port", DefaultPort, "")
 	fset.IntVar(&port, "p", DefaultPort, "")
 	noReload := fset.Bool("no-reload", false, "")
+	verbose := fset.Bool("verbose", false, "")
 	if err := fset.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printHelp(stdout)
@@ -125,7 +120,7 @@ func run(version string, args []string, stdout, stderr io.Writer) int {
 	// Ctrl+C kills the process instead of waiting for open requests.
 	context.AfterFunc(ctx, stop)
 
-	h := NewHandler(dir, log.New(stdout, "", log.Ltime), LogAll)
+	h := NewHandler(dir, log.New(stdout, "", log.Ltime), *verbose)
 	if !*noReload {
 		b := NewBroadcaster()
 		context.AfterFunc(ctx, b.Close)
@@ -205,25 +200,25 @@ func serverHeader(name string, next http.Handler) http.Handler {
 }
 
 // NewHandler serves the files in dir without caching, dotfiles or
-// directory listings, and logs requests to logger as mode says.
-func NewHandler(dir string, logger *log.Logger, mode RequestLog) http.Handler {
+// directory listings. It logs failed requests (status >= 400) to logger,
+// or every request if verbose.
+func NewHandler(dir string, logger *log.Logger, verbose bool) http.Handler {
 	files := http.FileServer(noListingFS{http.Dir(dir)})
-	return logRequests(logger, mode, noCache(notFoundPage(dir, hideDotfiles(files))))
+	return logRequests(logger, verbose, noCache(notFoundPage(dir, hideDotfiles(files))))
 }
 
-func logRequests(logger *log.Logger, mode RequestLog, next http.Handler) http.Handler {
+func logRequests(logger *log.Logger, verbose bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		// Browsers and tools probe /.well-known/ on their own (Chrome asks
-		// for a devtools.json), so those 404s are noise, not broken links.
-		if rec.status == http.StatusNotFound && strings.HasPrefix(r.URL.Path, "/.well-known/") {
-			return
+		if !verbose {
+			// Browsers and tools probe /.well-known/ on their own (Chrome asks
+			// for a devtools.json), so those requests are noise, not broken links.
+			if rec.status < 400 || strings.HasPrefix(r.URL.Path, "/.well-known/") {
+				return
+			}
 		}
-		failed := rec.status == http.StatusNotFound || rec.status >= 500
-		if mode == LogAll || failed {
-			logger.Printf("%s %s %d", r.Method, r.URL.Path, rec.status)
-		}
+		logger.Printf("%s %s %d", r.Method, r.URL.Path, rec.status)
 	})
 }
 

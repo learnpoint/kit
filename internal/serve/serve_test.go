@@ -26,7 +26,10 @@ func TestRun(t *testing.T) {
 		wantStdout string // substring
 		wantStderr string // substring; "" means stderr must be empty
 	}{
-		{name: "-h prints help", args: []string{"-h"}, wantCode: 0, wantStdout: "Usage: kit serve [--port N] [--no-reload]"},
+		{name: "-h prints help", args: []string{"-h"}, wantCode: 0, wantStdout: "Usage: kit serve [--port N] [--no-reload] [--verbose]"},
+		{name: "-h mentions --verbose", args: []string{"-h"}, wantCode: 0, wantStdout: "--verbose     log every request"},
+		{name: "--verbose is a known flag", args: []string{"--verbose", "extra"}, wantCode: 2, wantStderr: "unexpected arguments"},
+		{name: "no short verbose flag", args: []string{"-v"}, wantCode: 2, wantStderr: "flag provided but not defined: -v"},
 		{name: "-h mentions --no-reload", args: []string{"-h"}, wantCode: 0, wantStdout: "--no-reload   don't reload"},
 		{name: "--no-reload is a known flag", args: []string{"--no-reload", "extra"}, wantCode: 2, wantStderr: "unexpected arguments"},
 		{name: "unknown flag", args: []string{"-x"}, wantCode: 2, wantStderr: "flag provided but not defined: -x"},
@@ -163,7 +166,7 @@ func TestHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			var logs bytes.Buffer
-			h := NewHandler(dir, log.New(&logs, "", 0), LogAll)
+			h := NewHandler(dir, log.New(&logs, "", 0), true)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
 
@@ -192,7 +195,7 @@ func TestNoCacheAcrossFolders(t *testing.T) {
 	dirA := t.TempDir()
 	writeFiles(t, dirA, map[string]string{"index.html": "folder A"})
 	rec := httptest.NewRecorder()
-	NewHandler(dirA, log.New(io.Discard, "", 0), LogAll).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	NewHandler(dirA, log.New(io.Discard, "", 0), true).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	lastModified := rec.Header().Get("Last-Modified")
 	if lastModified == "" {
 		t.Fatal("folder A response has no Last-Modified")
@@ -208,7 +211,7 @@ func TestNoCacheAcrossFolders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("If-Modified-Since", lastModified)
 	rec = httptest.NewRecorder()
-	NewHandler(dirB, log.New(io.Discard, "", 0), LogAll).ServeHTTP(rec, req)
+	NewHandler(dirB, log.New(io.Discard, "", 0), true).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -235,7 +238,7 @@ func TestServeShutdown(t *testing.T) {
 	var stdout bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- Serve(ctx, ln, NewHandler(dir, log.New(io.Discard, "", 0), LogAll), "dev", &stdout)
+		done <- Serve(ctx, ln, NewHandler(dir, log.New(io.Discard, "", 0), true), "dev", &stdout)
 	}()
 
 	resp, err := http.Get("http://" + ln.Addr().String() + "/a.txt")
@@ -274,7 +277,7 @@ func TestServeServerHeader(t *testing.T) {
 	defer cancel()
 
 	b := NewBroadcaster()
-	h := WithReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), b)
+	h := WithReload(NewHandler(dir, log.New(io.Discard, "", 0), true), b)
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, ln, h, "v1.2.3", io.Discard) }()
 
@@ -316,41 +319,73 @@ func TestServeServerHeader(t *testing.T) {
 	}
 }
 
-func TestHandlerLogFailed(t *testing.T) {
-	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"a.txt": "hello"})
-
-	var logs bytes.Buffer
-	h := NewHandler(dir, log.New(&logs, "", 0), LogFailed)
-	for _, p := range []string{"/a.txt", "/missing"} {
-		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, p, nil))
+func TestLogRequests(t *testing.T) {
+	tests := []struct {
+		path    string
+		status  int
+		verbose bool
+		wantLog bool
+	}{
+		{path: "/a.txt", status: http.StatusOK, wantLog: false},
+		{path: "/a.txt", status: http.StatusNotModified, wantLog: false},
+		{path: "/a.txt", status: 399, wantLog: false},
+		{path: "/a.txt", status: http.StatusBadRequest, wantLog: true},
+		{path: "/a.txt", status: http.StatusNotFound, wantLog: true},
+		{path: "/a.txt", status: http.StatusInternalServerError, wantLog: true},
+		{path: "/.well-known/x", status: http.StatusNotFound, wantLog: false},
+		{path: "/.well-known/x", status: http.StatusOK, wantLog: false},
+		{path: "/.well-known/x", status: http.StatusInternalServerError, wantLog: false},
+		{path: "/a.txt", status: http.StatusOK, verbose: true, wantLog: true},
+		{path: "/a.txt", status: http.StatusNotFound, verbose: true, wantLog: true},
+		{path: "/.well-known/x", status: http.StatusOK, verbose: true, wantLog: true},
+		{path: "/.well-known/x", status: http.StatusNotFound, verbose: true, wantLog: true},
 	}
-	if got, want := logs.String(), "GET /missing 404\n"; got != want {
-		t.Errorf("log = %q, want %q", got, want)
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s %d verbose=%t", tt.path, tt.status, tt.verbose), func(t *testing.T) {
+			var logs bytes.Buffer
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+			})
+			h := logRequests(log.New(&logs, "", 0), tt.verbose, next)
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, tt.path, nil))
+
+			want := ""
+			if tt.wantLog {
+				want = fmt.Sprintf("GET %s %d\n", tt.path, tt.status)
+			}
+			if logs.String() != want {
+				t.Errorf("log = %q, want %q", logs.String(), want)
+			}
+		})
 	}
 }
 
-func TestHandlerSkipsWellKnown404Log(t *testing.T) {
+func TestHandlerWellKnown(t *testing.T) {
 	const page = "<html><body>custom not found</body></html>"
+	const probe = "/.well-known/appspecific/com.chrome.devtools.json"
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"404.html": page, "a.txt": "hello"})
+	writeFiles(t, dir, map[string]string{"404.html": page})
 
-	for _, mode := range []RequestLog{LogAll, LogFailed} {
+	for _, verbose := range []bool{false, true} {
 		var logs bytes.Buffer
-		h := NewHandler(dir, log.New(&logs, "", 0), mode)
+		h := NewHandler(dir, log.New(&logs, "", 0), verbose)
 
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/appspecific/com.chrome.devtools.json", nil))
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, probe, nil))
 		if rec.Code != http.StatusNotFound {
-			t.Errorf("mode %d: status = %d, want %d", mode, rec.Code, http.StatusNotFound)
+			t.Errorf("verbose=%t: status = %d, want %d", verbose, rec.Code, http.StatusNotFound)
 		}
 		if got := rec.Body.String(); got != page {
-			t.Errorf("mode %d: body = %q, want %q", mode, got, page)
+			t.Errorf("verbose=%t: body = %q, want %q", verbose, got, page)
 		}
 
-		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
-		if got, want := logs.String(), "GET /missing 404\n"; got != want {
-			t.Errorf("mode %d: log = %q, want %q", mode, got, want)
+		want := ""
+		if verbose {
+			want = "GET " + probe + " 404\n"
+		}
+		if got := logs.String(); got != want {
+			t.Errorf("verbose=%t: log = %q, want %q", verbose, got, want)
 		}
 	}
 }
@@ -385,7 +420,7 @@ func TestNotFoundPage(t *testing.T) {
 				method = http.MethodGet
 			}
 			var logs bytes.Buffer
-			h := NewHandler(dir, log.New(&logs, "", 0), LogAll)
+			h := NewHandler(dir, log.New(&logs, "", 0), true)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(method, tt.path, nil))
 
@@ -413,7 +448,7 @@ func TestNotFoundPage(t *testing.T) {
 }
 
 func TestNotFoundWithoutPage(t *testing.T) {
-	h := NewHandler(t.TempDir(), log.New(io.Discard, "", 0), LogAll)
+	h := NewHandler(t.TempDir(), log.New(io.Discard, "", 0), true)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
 

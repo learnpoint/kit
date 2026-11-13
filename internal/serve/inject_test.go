@@ -45,7 +45,7 @@ func TestInjectReload(t *testing.T) {
 		"style.css":  "body { color: red }",
 		"a.txt":      "<p>not html</p>",
 	})
-	h := injectReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), func() string { return "v1" })
+	h := injectReload(NewHandler(dir, log.New(io.Discard, "", 0), true), func() string { return "v1" })
 
 	tests := []struct {
 		name       string
@@ -114,7 +114,7 @@ func TestInjectReload(t *testing.T) {
 func TestInjectReloadNotFoundPage(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{"404.html": "<body>not found</body>"})
-	h := injectReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), func() string { return "v1" })
+	h := injectReload(NewHandler(dir, log.New(io.Discard, "", 0), true), func() string { return "v1" })
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing", nil))
@@ -136,7 +136,7 @@ func TestWithReloadInjects(t *testing.T) {
 	writeFiles(t, dir, map[string]string{"index.html": "<body>home</body>"})
 	b := NewBroadcaster()
 	defer b.Close()
-	srv := httptest.NewServer(WithReload(NewHandler(dir, log.New(io.Discard, "", 0), LogAll), b))
+	srv := httptest.NewServer(WithReload(NewHandler(dir, log.New(io.Discard, "", 0), true), b))
 	defer srv.Close()
 
 	get := func() string {

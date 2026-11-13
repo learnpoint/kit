@@ -77,8 +77,14 @@ func TestRun(t *testing.T) {
 	if code := run("dev", []string{"-p", "0"}, &stdout, &stderr); code != 2 {
 		t.Errorf("-p 0: exit code = %d, want 2", code)
 	}
+	if code := run("dev", []string{"--verbose", "extra"}, &stdout, &stderr); code != 2 {
+		t.Errorf("--verbose extra: exit code = %d, want 2", code)
+	}
+	if code := run("dev", []string{"-v"}, &stdout, &stderr); code != 2 {
+		t.Errorf("-v: exit code = %d, want 2", code)
+	}
 	stdout.Reset()
-	if code := run("dev", []string{"-h"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Usage: kit dev") {
+	if code := run("dev", []string{"-h"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Usage: kit dev [--port N] [--verbose]") || !strings.Contains(stdout.String(), "--verbose  log every request") {
 		t.Errorf("-h: exit code %d, stdout %q", code, stdout.String())
 	}
 }

@@ -219,7 +219,7 @@ func TestWithReload(t *testing.T) {
 
 	var logs strings.Builder
 	b := NewBroadcaster()
-	srv := httptest.NewServer(WithReload(NewHandler(dir, log.New(&logs, "", 0), LogAll), b))
+	srv := httptest.NewServer(WithReload(NewHandler(dir, log.New(&logs, "", 0), true), b))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/a.txt")
