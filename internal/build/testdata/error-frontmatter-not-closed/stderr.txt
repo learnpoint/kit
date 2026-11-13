@@ -1,0 +1,2 @@
+src/index.html: frontmatter has no closing "---"
+kit build: 1 error, nothing written

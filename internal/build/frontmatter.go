@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,8 +10,9 @@ import (
 var frontmatterKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // parseFrontmatter splits text into its frontmatter data and content.
-// Frontmatter exists only if the first line is "---" and a later line
-// is "---". Without it, data is empty and content is text unchanged.
+// Frontmatter exists only if the first line is "---", and it must be
+// closed by a later "---" line. Without it, data is empty and content is
+// text unchanged.
 func parseFrontmatter(text string) (map[string]string, string, error) {
 	data := map[string]string{}
 
@@ -28,7 +30,7 @@ func parseFrontmatter(text string) (map[string]string, string, error) {
 			break
 		}
 		if !found {
-			return data, text, nil
+			return nil, "", errors.New("frontmatter has no closing \"---\"")
 		}
 		header = append(header, line)
 		body = next
