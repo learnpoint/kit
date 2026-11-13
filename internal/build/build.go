@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/learnpoint/kit/internal/cli"
+	"github.com/learnpoint/kit/internal/color"
 )
 
 func Command() cli.Command {
@@ -119,23 +120,33 @@ func Build(dir string) (Result, error) {
 }
 
 // Print prints the outcome of Build as the command cmd and reports
-// whether the build succeeded.
+// whether the build succeeded. Lines written to stderr are red when
+// stderr is a terminal that supports colors.
 func Print(cmd string, res Result, err error, stdout, stderr io.Writer) bool {
+	red := color.Enabled(stderr)
+	fail := func(format string, a ...any) {
+		line := fmt.Sprintf(format, a...)
+		if red {
+			line = color.Red(line)
+		}
+		fmt.Fprintln(stderr, line)
+	}
+
 	if errors.Is(err, ErrNoSrc) {
-		fmt.Fprintf(stderr, "kit %s: %v\n", cmd, err)
-		fmt.Fprintf(stderr, "Run %s from the project folder (the one that contains src/).\n", cmd)
+		fail("kit %s: %v", cmd, err)
+		fail("Run %s from the project folder (the one that contains src/).", cmd)
 		return false
 	}
 
 	if len(res.Problems) > 0 {
 		for _, p := range res.Problems {
-			fmt.Fprintln(stderr, p)
+			fail("%s", p)
 		}
 		word := "errors"
 		if len(res.Problems) == 1 {
 			word = "error"
 		}
-		fmt.Fprintf(stderr, "kit %s: %d %s, nothing written\n", cmd, len(res.Problems), word)
+		fail("kit %s: %d %s, nothing written", cmd, len(res.Problems), word)
 		return false
 	}
 
@@ -146,7 +157,7 @@ func Print(cmd string, res Result, err error, stdout, stderr io.Writer) bool {
 		fmt.Fprintf(stdout, "deleted docs/%s\n", d)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "kit %s: %v\n", cmd, err)
+		fail("kit %s: %v", cmd, err)
 		return false
 	}
 	fmt.Fprintf(stdout, "built docs/ in %d ms (%d written, %d deleted)\n",
